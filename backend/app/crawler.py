@@ -95,14 +95,14 @@ def _is_duplicate(db: Session, source_id: str) -> bool:
     return existing is not None
 
 
-def _insert_and_enqueue(
+def _insert_item(
     db: Session,
     source_user: User,
     text_content: str | None,
     media_url: str | None,
     created_at: datetime,
 ) -> ContentItem | None:
-    """Insert a ContentItem and enqueue moderation. Returns the item or None."""
+    """Insert a ContentItem. Returns the item or None."""
     if not text_content and not media_url:
         return None
 
@@ -125,10 +125,6 @@ def _insert_and_enqueue(
     )
     db.add(item)
     db.flush()
-
-    from app.worker import moderate_content
-
-    moderate_content.delay(str(item.id))
     return item
 
 
@@ -159,9 +155,10 @@ def _search_video_ids(youtube, query: str, max_results: int = 5) -> list[str]:
 
 def _crawl_comments_for_video(
     youtube, video_id: str, db: Session, source_user: User, max_comments: int
-) -> int:
-    """Fetch top-level comments for a video. Returns count of new items."""
+) -> tuple[int, list[str]]:
+    """Fetch top-level comments for a video. Returns (count, list of item IDs)."""
     count = 0
+    new_item_ids: list[str] = []
     page_token = None
 
     while count < max_comments:
@@ -211,17 +208,18 @@ def _crawl_comments_for_video(
             if avatar_url:
                 media_url = _download_image(avatar_url)
 
-            item = _insert_and_enqueue(
+            item = _insert_item(
                 db, source_user, text_content, media_url, created_at
             )
             if item:
+                new_item_ids.append(str(item.id))
                 count += 1
 
         page_token = response.get("nextPageToken")
         if not page_token:
             break
 
-    return count
+    return count, new_item_ids
 
 
 def crawl_youtube() -> int:
@@ -260,12 +258,14 @@ def crawl_youtube() -> int:
         logger.warning("No YouTube videos to crawl — skipping")
         return 0
 
+    all_item_ids: list[str] = []
+
     with SyncSession() as db:
         source_user = _get_or_create_source_user(db, "youtube")
 
         for video_id in video_ids:
             try:
-                n = _crawl_comments_for_video(
+                n, item_ids = _crawl_comments_for_video(
                     youtube,
                     video_id,
                     db,
@@ -273,11 +273,17 @@ def crawl_youtube() -> int:
                     settings.youtube_max_comments,
                 )
                 count += n
+                all_item_ids.extend(item_ids)
                 logger.info(f"YouTube video {video_id}: crawled {n} new comments")
             except Exception as e:
                 logger.error(f"YouTube video {video_id} crawl failed: {e}")
 
         db.commit()
+
+    # Enqueue moderation AFTER commit so the worker can find the items
+    from app.worker import moderate_content
+    for item_id in all_item_ids:
+        moderate_content.delay(item_id)
 
     logger.info(f"YouTube crawl complete — {count} new items")
     return count
