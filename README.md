@@ -146,6 +146,24 @@ The crawler fetches real comments from YouTube videos for moderation analysis.
 docker compose exec worker python -m app.crawler
 ```
 
+### Manual crawl via API
+
+Admins can trigger a crawl immediately via the API instead of waiting for the Celery Beat schedule:
+
+```
+POST /api/crawl/trigger
+Authorization: Bearer <admin-token>
+```
+
+### Retry pending moderation
+
+If items are stuck in "Pending" status (e.g. due to worker downtime), admins can re-queue them all:
+
+```
+POST /api/moderate/retry-pending
+Authorization: Bearer <admin-token>
+```
+
 ---
 
 ## ML Classification Pipeline
@@ -167,12 +185,20 @@ Content is classified by multiple models running in the Celery worker:
 - **Auto-approve**: Content with all toxic scores below 0.15 is automatically approved
 - **Flagged**: High-confidence toxic content (>= 0.85) is auto-flagged
 - **In review**: Moderate-confidence toxic content (0.75–0.85) is routed to human reviewers
+- **Model preloading**: ML models are loaded when the Celery worker starts (via `worker_ready` signal), eliminating the ~20s delay on the first moderation task
 
 ---
 
 ## Review Queue & Detail Modal
 
 The review queue displays all crawled content with filterable status tabs (All, Pending, In Review, Flagged, Approved, Rejected).
+
+### Queue table
+
+- Shows **category** and **confidence %** for all items (including clean results)
+- Displays the **YouTube commenter name** (extracted from source metadata, not the internal crawler user)
+- **Approve** — instantly approves the item and creates a "clean" moderation result (100% confidence)
+- **Reject** — opens a modal where the reviewer must select a category (Toxicity, NSFW, Spam, Violence, Hate Speech) and can optionally provide a reason. The classification is saved as a manual moderation result so it appears in the dashboard analytics
 
 ### Clicking a row opens a detail modal showing:
 
@@ -182,8 +208,6 @@ The review queue displays all crawled content with filterable status tabs (All, 
 - **Link to source video** (clickable, opens YouTube)
 - **Moderation results** — each model's category and confidence score
 - **Current status** with Approve/Reject actions
-
-The queue table shows the YouTube commenter name (not the internal crawler user) for each row.
 
 ---
 
@@ -284,7 +308,13 @@ Every push to main auto-deploys both Vercel and Railway.
 | POST   | /api/content/submit          | Submit text/image for moderation |
 | GET    | /api/content/queue           | List content (filterable)        |
 | GET    | /api/content/{id}            | Detail with moderation results   |
-| POST   | /api/content/{id}/review     | Admin approve/reject             |
+| POST   | /api/content/{id}/review     | Admin approve/reject (with category on reject) |
+
+### Crawl & Moderation
+| Method | Endpoint                 | Description                          |
+| ------ | ------------------------ | ------------------------------------ |
+| POST   | /api/crawl/trigger       | Manually trigger YouTube crawl       |
+| POST   | /api/moderate/retry-pending | Re-queue all pending items for moderation |
 
 ### Dashboard
 | Method | Endpoint        | Description                       |
