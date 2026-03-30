@@ -1,20 +1,39 @@
 from contextlib import asynccontextmanager
+from uuid import uuid4
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
 from app.config import get_settings
-from app.database import init_db
+from app.database import init_db, async_session
+from app.models import User
+from app.services.auth import hash_password
 from app.routers import auth_router, content_router, dashboard_router
 
 settings = get_settings()
 
 
+async def _ensure_admin():
+    """Create the default admin user if no users exist yet."""
+    async with async_session() as db:
+        result = await db.execute(select(User).limit(1))
+        if result.scalar_one_or_none() is None:
+            db.add(User(
+                id=uuid4(),
+                email="admin@demo.com",
+                username="admin",
+                hashed_password=hash_password("admin123"),
+                is_admin=True,
+            ))
+            await db.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: create database tables
     await init_db()
+    await _ensure_admin()
     yield
-    # Shutdown: cleanup if needed
 
 
 app = FastAPI(
