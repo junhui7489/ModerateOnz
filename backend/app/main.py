@@ -6,7 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.database import init_db, async_session
+from app.database import init_db, async_session, get_db
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import User
 from app.routers import auth_router, content_router, dashboard_router
 from app.services.auth import hash_password, require_admin
@@ -72,3 +73,23 @@ async def trigger_crawl(_user: User = Depends(require_admin)):
         return {"status": "ok", "results": results}
     except Exception as e:
         return {"status": "error", "detail": str(e)}
+
+
+@app.post("/api/moderate/retry-pending")
+async def retry_pending(
+    _user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-queue all pending content items for moderation."""
+    from app.models import ContentItem, ModerationStatus
+    from app.worker import moderate_content
+
+    result = await db.execute(
+        select(ContentItem.id).where(ContentItem.status == ModerationStatus.PENDING)
+    )
+    pending_ids = [str(row[0]) for row in result.all()]
+
+    for item_id in pending_ids:
+        moderate_content.delay(item_id)
+
+    return {"status": "ok", "queued": len(pending_ids)}
