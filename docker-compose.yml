@@ -1,0 +1,89 @@
+version: "3.9"
+
+x-backend-env: &backend-env
+  DATABASE_URL: ${DATABASE_URL}
+  REDIS_URL: ${REDIS_URL}
+  SECRET_KEY: ${SECRET_KEY}
+  FRONTEND_URL: ${FRONTEND_URL}
+  YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+  YOUTUBE_VIDEO_IDS: ${YOUTUBE_VIDEO_IDS}
+  YOUTUBE_SEARCH_QUERIES: ${YOUTUBE_SEARCH_QUERIES}
+  YOUTUBE_MAX_COMMENTS: ${YOUTUBE_MAX_COMMENTS}
+  CRAWLER_INTERVAL_MINUTES: ${CRAWLER_INTERVAL_MINUTES}
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: moderation
+      POSTGRES_PASSWORD: moderation_secret
+      POSTGRES_DB: moderation_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - uploads:/app/uploads
+    environment:
+      <<: *backend-env
+    depends_on:
+      - db
+      - redis
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.worker.celery_app worker --loglevel=info --concurrency=2
+    volumes:
+      - ./backend:/app
+      - uploads:/app/uploads
+    environment:
+      <<: *backend-env
+    depends_on:
+      - db
+      - redis
+
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.worker.celery_app beat --loglevel=info
+    volumes:
+      - ./backend:/app
+    environment:
+      <<: *backend-env
+    depends_on:
+      - db
+      - redis
+      - worker
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  uploads:
