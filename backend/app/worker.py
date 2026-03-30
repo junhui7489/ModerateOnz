@@ -8,12 +8,13 @@ the ML classifiers, store results, and update content status.
 import logging
 from uuid import UUID
 from celery import Celery
+from celery.signals import worker_ready
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
 from app.models import ContentItem, ModerationResult, ModerationStatus, FlagCategory
-from app.services.classifiers import classify_text, classify_image, FLAG_THRESHOLD
+from app.services.classifiers import classify_text, classify_image, FLAG_THRESHOLD, preload_models
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -48,6 +49,12 @@ _db_url = settings.database_url
 _db_url = _db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
 sync_engine = create_engine(_db_url, pool_size=5, max_overflow=5)
 SyncSession = sessionmaker(sync_engine)
+
+
+@worker_ready.connect
+def on_worker_ready(**kwargs):
+    """Preload ML models when the worker starts so tasks execute immediately."""
+    preload_models()
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30)

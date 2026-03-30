@@ -33,6 +33,14 @@ _sentiment_classifier: Pipeline | None = None
 _image_classifier: Pipeline | None = None
 
 
+def preload_models():
+    """Load text and sentiment models eagerly so the first task doesn't wait."""
+    logger.info("Preloading ML models...")
+    _get_text_classifier()
+    _get_sentiment_classifier()
+    logger.info("ML models ready.")
+
+
 def _get_text_classifier() -> Pipeline:
     global _text_classifier
     if _text_classifier is None:
