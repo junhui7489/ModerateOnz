@@ -74,6 +74,7 @@ export interface ContentWithResults extends ContentItem {
 export interface ReviewAction {
   action: ModerationStatus;
   reason?: string;
+  category?: FlagCategory;
 }
 
 // ── Dashboard ────────────────────────────────────────

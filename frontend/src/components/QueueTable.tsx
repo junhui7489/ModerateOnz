@@ -1,10 +1,18 @@
 import { useState } from "react";
 import { formatDistanceToNow, parseISO } from "date-fns";
-import { MessageSquare, Image, AlertTriangle } from "lucide-react";
+import { MessageSquare, Image, AlertTriangle, X } from "lucide-react";
 import { StatusBadge, CategoryBadge } from "@/components/StatusBadge";
 import { useReviewContent } from "@/hooks/useApi";
 import ContentDetailModal from "@/components/ContentDetailModal";
 import type { ContentWithResults, FlagCategory } from "@/types";
+
+const REJECT_CATEGORIES: { value: FlagCategory; label: string }[] = [
+  { value: "toxicity", label: "Toxicity" },
+  { value: "nsfw", label: "NSFW" },
+  { value: "spam", label: "Spam" },
+  { value: "violence", label: "Violence" },
+  { value: "hate_speech", label: "Hate Speech" },
+];
 
 interface Props {
   items: ContentWithResults[];
@@ -55,15 +63,32 @@ export default function QueueTable({ items }: Props) {
   const [selectedItem, setSelectedItem] = useState<ContentWithResults | null>(
     null
   );
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [rejectCategory, setRejectCategory] = useState<FlagCategory>("toxicity");
+  const [rejectReason, setRejectReason] = useState("");
   const reviewMutation = useReviewContent();
 
-  const handleAction = (
-    e: React.MouseEvent,
-    id: string,
-    action: "approved" | "rejected"
-  ) => {
+  const handleApprove = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    reviewMutation.mutate({ id, action: { action } });
+    reviewMutation.mutate({ id, action: { action: "approved" } });
+  };
+
+  const openRejectModal = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    setRejectingId(id);
+    setRejectCategory("toxicity");
+    setRejectReason("");
+  };
+
+  const submitReject = () => {
+    if (!rejectingId) return;
+    reviewMutation.mutate(
+      {
+        id: rejectingId,
+        action: { action: "rejected", category: rejectCategory, reason: rejectReason || undefined },
+      },
+      { onSuccess: () => setRejectingId(null) }
+    );
   };
 
   if (!items.length) {
@@ -149,14 +174,14 @@ export default function QueueTable({ items }: Props) {
                       item.status === "flagged") && (
                       <div className="flex gap-2">
                         <button
-                          onClick={(e) => handleAction(e, item.id, "approved")}
+                          onClick={(e) => handleApprove(e, item.id)}
                           disabled={reviewMutation.isPending}
                           className="rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100 transition"
                         >
                           Approve
                         </button>
                         <button
-                          onClick={(e) => handleAction(e, item.id, "rejected")}
+                          onClick={(e) => openRejectModal(e, item.id)}
                           disabled={reviewMutation.isPending}
                           className="rounded-md bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-100 transition"
                         >
@@ -177,6 +202,70 @@ export default function QueueTable({ items }: Props) {
           item={selectedItem}
           onClose={() => setSelectedItem(null)}
         />
+      )}
+
+      {rejectingId && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setRejectingId(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl w-full max-w-md p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Reject Content</h3>
+              <button
+                onClick={() => setRejectingId(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Category
+            </label>
+            <select
+              value={rejectCategory}
+              onChange={(e) => setRejectCategory(e.target.value as FlagCategory)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              {REJECT_CATEGORIES.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Reason (optional)
+            </label>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              rows={3}
+              placeholder="Why is this content being rejected?"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+            />
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setRejectingId(null)}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitReject}
+                disabled={reviewMutation.isPending}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition disabled:opacity-50"
+              >
+                {reviewMutation.isPending ? "Rejecting..." : "Reject"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

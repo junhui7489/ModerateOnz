@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.config import get_settings
-from app.models import ContentItem, ContentType, ModerationStatus, AuditLog, User
+from app.models import ContentItem, ContentType, ModerationStatus, ModerationResult, FlagCategory, AuditLog, User
 from app.schemas import ContentResponse, ContentWithResults, ContentSubmit, ReviewAction
 from app.services.auth import get_current_user, require_admin
 from app.worker import moderate_content
@@ -130,6 +130,26 @@ async def review_content(
 
     if action.action not in (ModerationStatus.APPROVED, ModerationStatus.REJECTED, ModerationStatus.FLAGGED):
         raise HTTPException(status_code=400, detail="Invalid action")
+
+    # Save manual category classification
+    if action.action == ModerationStatus.REJECTED and action.category:
+        manual_result = ModerationResult(
+            content_id=content.id,
+            category=FlagCategory(action.category),
+            confidence=1.0,
+            model_name="manual-review",
+            details=f"Manually classified by reviewer: {action.reason or ''}".strip(),
+        )
+        db.add(manual_result)
+    elif action.action == ModerationStatus.APPROVED:
+        manual_result = ModerationResult(
+            content_id=content.id,
+            category=FlagCategory.CLEAN,
+            confidence=1.0,
+            model_name="manual-review",
+            details="Approved by reviewer",
+        )
+        db.add(manual_result)
 
     # Audit log
     audit = AuditLog(

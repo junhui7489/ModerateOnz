@@ -77,6 +77,7 @@ class ModerationResultResponse(BaseModel):
 class ReviewAction(BaseModel):
     action: ModerationStatus
     reason: str | None = None
+    category: FlagCategory | None = None
 
 
 # ── Dashboard / Analytics ─────────────────────────────
