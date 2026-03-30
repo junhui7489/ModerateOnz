@@ -35,14 +35,20 @@ function getCommenterName(text: string | null, fallback: string): string {
   return match ? match[1] : fallback;
 }
 
-function getTopFlag(results: ContentWithResults["moderation_results"]): {
+function getTopResult(results: ContentWithResults["moderation_results"]): {
   category: FlagCategory;
   confidence: number;
 } | null {
+  if (!results.length) return null;
+  // Prefer non-clean flags; fall back to the top clean result
   const flags = results.filter((r) => r.category !== "clean");
-  if (!flags.length) return null;
-  flags.sort((a, b) => b.confidence - a.confidence);
-  return { category: flags[0].category, confidence: flags[0].confidence };
+  if (flags.length) {
+    flags.sort((a, b) => b.confidence - a.confidence);
+    return { category: flags[0].category, confidence: flags[0].confidence };
+  }
+  // All clean — return the highest-confidence clean result
+  const sorted = [...results].sort((a, b) => b.confidence - a.confidence);
+  return { category: sorted[0].category, confidence: sorted[0].confidence };
 }
 
 export default function QueueTable({ items }: Props) {
@@ -85,7 +91,7 @@ export default function QueueTable({ items }: Props) {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {items.map((item) => {
-              const topFlag = getTopFlag(item.moderation_results);
+              const topFlag = getTopResult(item.moderation_results);
               return (
                 <tr
                   key={item.id}
@@ -119,7 +125,9 @@ export default function QueueTable({ items }: Props) {
                     {topFlag ? (
                       <span
                         className={
-                          topFlag.confidence >= 0.85
+                          topFlag.category === "clean"
+                            ? "text-emerald-600"
+                            : topFlag.confidence >= 0.85
                             ? "text-red-600"
                             : topFlag.confidence >= 0.65
                             ? "text-amber-600"
@@ -129,7 +137,7 @@ export default function QueueTable({ items }: Props) {
                         {(topFlag.confidence * 100).toFixed(1)}%
                       </span>
                     ) : (
-                      <span className="text-emerald-600">Clean</span>
+                      <span className="text-xs text-gray-400">—</span>
                     )}
                   </td>
                   <td className="px-5 py-4">
