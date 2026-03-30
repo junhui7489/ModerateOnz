@@ -1,15 +1,15 @@
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import init_db, async_session
 from app.models import User
-from app.services.auth import hash_password
 from app.routers import auth_router, content_router, dashboard_router
+from app.services.auth import hash_password, require_admin
 
 settings = get_settings()
 
@@ -61,3 +61,14 @@ app.include_router(dashboard_router)
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok", "service": "content-moderation-api"}
+
+
+@app.post("/api/crawl/trigger")
+async def trigger_crawl(_user: User = Depends(require_admin)):
+    """Manually trigger a crawl (admin only). Runs synchronously for debugging."""
+    from app.crawler import run_all_crawlers
+    try:
+        results = run_all_crawlers()
+        return {"status": "ok", "results": results}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
