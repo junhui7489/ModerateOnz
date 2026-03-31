@@ -45,8 +45,8 @@ A full-stack AI-powered content moderation platform that crawls real YouTube com
 | State       | TanStack React Query (server state + polling)      |
 | Backend API | FastAPI, Pydantic, SQLAlchemy 2.0 (async)          |
 | Auth        | JWT (python-jose), bcrypt                          |
-| Queue       | Celery 5 + Redis                                   |
-| ML Models   | HuggingFace Transformers                           |
+| Queue       | Celery 5 + Redis (solo pool, single concurrency)   |
+| ML Models   | HuggingFace Transformers (CPU-only PyTorch)        |
 | Crawler     | YouTube Data API v3 (google-api-python-client)     |
 | Database    | PostgreSQL 16                                      |
 
@@ -189,6 +189,43 @@ Content is classified by multiple models running in the Celery worker:
 
 ---
 
+## Resource Optimization
+
+The project is structured to minimize CPU and RAM usage across Railway services:
+
+### Dependency Isolation
+
+- **`requirements-base.txt`** — Core dependencies shared by all services (FastAPI, Celery, SQLAlchemy, etc.). No ML libraries.
+- **`requirements.txt`** — Extends base with ML dependencies (PyTorch, Transformers, Pillow). Only installed on the Worker service.
+- The API and Beat services use slim Dockerfiles (`Dockerfile`, `Dockerfile.beat`) that install only base dependencies, avoiding the ~2GB PyTorch/Transformers overhead.
+
+### Lazy Imports
+
+- ML classifiers (`torch`, `transformers`) are imported lazily inside Celery task functions, not at module level
+- This ensures that importing `celery_app` (required by Beat and API for task dispatch) never triggers ML model loading
+- The API's `moderate_content.delay()` call uses a lazy import to avoid pulling in the worker module at startup
+
+### Worker Configuration
+
+- **`--pool=solo`** — Runs tasks in the main process instead of forking child processes. ML models are loaded once in memory, not duplicated per fork.
+- **`--concurrency=1`** — Processes one task at a time (ML inference is CPU-bound; parallelism adds overhead without benefit)
+- **PyTorch optimizations** — `OMP_NUM_THREADS=2`, `MKL_NUM_THREADS=2`, `TOKENIZERS_PARALLELISM=false` to limit thread spawning
+
+### Connection Pools
+
+- API: `pool_size=5, max_overflow=3` (single gunicorn worker)
+- Worker: `pool_size=2, max_overflow=1` (single Celery process)
+
+### Dockerfiles
+
+| Service | Dockerfile          | Dependencies        | Workers |
+| ------- | ------------------- | ------------------- | ------- |
+| API     | `Dockerfile`        | `requirements-base` | 1 gunicorn worker |
+| Worker  | `Dockerfile.worker` | `requirements` (full ML) | 1 solo pool |
+| Beat    | `Dockerfile.beat`   | `requirements-base` | 1 beat scheduler |
+
+---
+
 ## Review Queue & Detail Modal
 
 The review queue displays all crawled content with filterable status tabs (All, Pending, In Review, Flagged, Approved, Rejected).
@@ -260,7 +297,7 @@ git push -u origin main
 6. Create the Beat service (crawler scheduler):
    - Click "+ New" → GitHub Repo (same repo)
    - Root directory: backend
-   - Start command: `celery -A app.worker.celery_app beat --loglevel=info`
+   - Override Dockerfile path: `Dockerfile.beat`
    - Same shared environment variables from plugins
 
 7. Generate a public domain for the API service:
@@ -332,9 +369,11 @@ content-moderation-dashboard/
 ├── docker-compose.yml           # 6 services with env var interpolation
 ├── backend/
 │   ├── .dockerignore            # Excludes .env from Docker image
-│   ├── Dockerfile               # API (gunicorn + uvicorn)
-│   ├── Dockerfile.worker        # Celery worker
-│   ├── requirements.txt
+│   ├── Dockerfile               # API (gunicorn + uvicorn, slim — no ML)
+│   ├── Dockerfile.worker        # Celery worker (full ML dependencies)
+│   ├── Dockerfile.beat          # Celery Beat scheduler (slim — no ML)
+│   ├── requirements-base.txt    # Core deps (no ML) — used by API & Beat
+│   ├── requirements.txt         # Extends base with ML deps — used by Worker
 │   └── app/
 │       ├── main.py              # FastAPI app
 │       ├── config.py            # Settings (DB, Redis, YouTube API, crawler)
