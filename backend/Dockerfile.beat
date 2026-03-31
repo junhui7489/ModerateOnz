@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Beat only schedules tasks — no ML dependencies needed
+COPY requirements-base.txt .
+RUN pip install --no-cache-dir -r requirements-base.txt
+
+COPY . .
+
+CMD celery -A app.worker.celery_app beat --loglevel=info

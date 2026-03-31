@@ -6,9 +6,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY requirements.txt requirements-base.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD celery -A app.worker.celery_app worker --loglevel=info --concurrency=2
+# --pool=solo: run tasks in the main process (no fork), so ML models are loaded once
+# --concurrency=1: process one task at a time (ML inference is CPU-bound)
+# This cuts RAM from ~2x model size to ~1x model size
+ENV PYTORCH_NO_CUDA=1
+ENV OMP_NUM_THREADS=2
+ENV MKL_NUM_THREADS=2
+ENV TOKENIZERS_PARALLELISM=false
+
+CMD celery -A app.worker.celery_app worker --loglevel=info --pool=solo --concurrency=1

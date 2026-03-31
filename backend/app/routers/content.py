@@ -11,7 +11,6 @@ from app.config import get_settings
 from app.models import ContentItem, ContentType, ModerationStatus, ModerationResult, FlagCategory, AuditLog, User
 from app.schemas import ContentResponse, ContentWithResults, ContentSubmit, ReviewAction
 from app.services.auth import get_current_user, require_admin
-from app.worker import moderate_content
 
 router = APIRouter(prefix="/api/content", tags=["content"])
 settings = get_settings()
@@ -67,7 +66,8 @@ async def submit_content(
     await db.commit()
     await db.refresh(content)
 
-    # Dispatch async moderation task
+    # Dispatch async moderation task (lazy import to avoid loading ML deps in API)
+    from app.worker import moderate_content
     moderate_content.delay(str(content.id))
 
     return content

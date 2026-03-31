@@ -14,7 +14,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
 from app.models import ContentItem, ModerationResult, ModerationStatus, FlagCategory
-from app.services.classifiers import classify_text, classify_image, FLAG_THRESHOLD, preload_models
+
+# ML classifiers are imported lazily inside tasks to avoid loading
+# torch/transformers when only celery_app is needed (Beat, API).
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -47,13 +49,14 @@ celery_app.conf.update(
 _db_url = settings.database_url
 # Convert async driver to sync for Celery
 _db_url = _db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
-sync_engine = create_engine(_db_url, pool_size=5, max_overflow=5)
+sync_engine = create_engine(_db_url, pool_size=2, max_overflow=1)
 SyncSession = sessionmaker(sync_engine)
 
 
 @worker_ready.connect
 def on_worker_ready(**kwargs):
     """Preload ML models when the worker starts so tasks execute immediately."""
+    from app.services.classifiers import preload_models
     preload_models()
 
 
@@ -63,6 +66,8 @@ def moderate_content(self, content_id: str):
     Main moderation task. Runs text and/or image classifiers,
     stores results, and updates the content item status.
     """
+    from app.services.classifiers import classify_text, classify_image, FLAG_THRESHOLD
+
     logger.info(f"Starting moderation for content {content_id}")
 
     with SyncSession() as db:
