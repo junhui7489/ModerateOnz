@@ -6,9 +6,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install only base dependencies (no ML/torch) — API doesn't run classifiers
-COPY backend/requirements-base.txt .
-RUN pip install --no-cache-dir -r requirements-base.txt
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/app/ ./app/
 
