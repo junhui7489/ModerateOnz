@@ -204,6 +204,7 @@ The project is structured to minimize CPU and RAM usage across Railway services:
 - ML classifiers (`torch`, `transformers`) are imported lazily inside Celery task functions, not at module level
 - This ensures that importing `celery_app` (required by Beat and API for task dispatch) never triggers ML model loading
 - The API's `moderate_content.delay()` call uses a lazy import to avoid pulling in the worker module at startup
+- `app/services/__init__.py` does not re-export classifiers — this prevents the hidden import chain (`routers/auth.py` → `services/__init__.py` → `classifiers.py` → `transformers`) from loading ML libraries in the API process
 
 ### Worker Configuration
 
