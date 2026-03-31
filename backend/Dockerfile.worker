@@ -6,10 +6,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt requirements-base.txt ./
+COPY backend/requirements-base.txt backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY backend/app/ ./app/
 
 # --pool=solo: run tasks in the main process (no fork), so ML models are loaded once
 # --concurrency=1: process one task at a time (ML inference is CPU-bound)
